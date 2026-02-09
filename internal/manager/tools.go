@@ -38,6 +38,8 @@ var knownTools = []toolDef{
 	{"gemini", "Gemini CLI", "gemini", ".gemini/settings.json", "json-mcpServers"},
 	{"codex", "Codex", "codex", ".codex/config.toml", "toml-codex"},
 	{"opencode", "OpenCode", "opencode", ".config/opencode/opencode.json", "json-opencode"},
+	{"kilo", "Kilo Code", "kilo", ".kilocode/mcp.json", "json-mcpServers"},
+	{"antygravity", "Antygravity", "antygravity", ".gemini/antygravity/mcp_config.json", "json-mcpServers"},
 }
 
 func (m *Manager) DetectTools() []CLITool {

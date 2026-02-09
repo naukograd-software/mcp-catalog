@@ -840,6 +840,7 @@
           <div class="server-meta">
             ${s.config.command} · <span class="tool-count">${toolCount} tools</span>
           </div>
+          ${s.status === 'error' && s.error ? `<div class="server-meta" style="color:var(--red);margin-top:4px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.error)}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -862,6 +863,8 @@
     const args = (s.config.args || []).join(' ');
     const env = s.config.env ? Object.entries(s.config.env).map(([k,v]) => `${k}=${v}`).join(', ') : '—';
     const checking = s.status === 'checking';
+    const serverLabel = s.serverName ? `${s.serverName}${s.serverVersion ? ' v' + s.serverVersion : ''}` : '—';
+    const duration = s.checkDuration ? s.checkDuration + 'ms' : '—';
 
     main.innerHTML = `
       <div class="detail-header">
@@ -877,13 +880,43 @@
         </div>
       </div>
 
+      ${s.status === 'error' && s.error ? `
       <div class="section">
-        <div class="section-title">Configuration</div>
+        <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:6px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--red);word-break:break-all">
+          ${escapeHtml(s.error)}
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="section">
+        <div class="section-title">Server Info</div>
         <div class="info-grid">
           <div class="info-card">
             <label>Status</label>
             <div class="value"><span class="status-badge status-${s.status}">${s.status}</span></div>
           </div>
+          <div class="info-card">
+            <label>Server</label>
+            <div class="value">${serverLabel}</div>
+          </div>
+          <div class="info-card">
+            <label>Protocol</label>
+            <div class="value">${s.protocolVersion || '—'}</div>
+          </div>
+          <div class="info-card">
+            <label>Last Check</label>
+            <div class="value">${lastCheck}</div>
+          </div>
+          <div class="info-card">
+            <label>Duration</label>
+            <div class="value">${duration}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Configuration</div>
+        <div class="info-grid">
           <div class="info-card">
             <label>Command</label>
             <div class="value">${s.config.command}</div>
@@ -891,10 +924,6 @@
           <div class="info-card">
             <label>Arguments</label>
             <div class="value">${args || '—'}</div>
-          </div>
-          <div class="info-card">
-            <label>Last Check</label>
-            <div class="value">${lastCheck}</div>
           </div>
           <div class="info-card">
             <label>Env</label>

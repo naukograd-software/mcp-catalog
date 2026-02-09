@@ -29,13 +29,17 @@ type LogEntry struct {
 }
 
 type ServerInfo struct {
-	Name      string           `json:"name"`
-	Config    config.MCPServer `json:"config"`
-	Status    ServerStatus     `json:"status"`
-	Error     string           `json:"error,omitempty"`
-	Logs      []LogEntry       `json:"logs"`
-	Tools     []MCPTool        `json:"tools"`
-	LastCheck *time.Time       `json:"lastCheck,omitempty"`
+	Name            string           `json:"name"`
+	Config          config.MCPServer `json:"config"`
+	Status          ServerStatus     `json:"status"`
+	Error           string           `json:"error,omitempty"`
+	Logs            []LogEntry       `json:"logs"`
+	Tools           []MCPTool        `json:"tools"`
+	LastCheck       *time.Time       `json:"lastCheck,omitempty"`
+	ServerName      string           `json:"serverName,omitempty"`
+	ServerVersion   string           `json:"serverVersion,omitempty"`
+	ProtocolVersion string           `json:"protocolVersion,omitempty"`
+	CheckDuration   int64            `json:"checkDuration,omitempty"`
 }
 
 type MCPTool struct {
@@ -58,6 +62,16 @@ type mcpResponse struct {
 type mcpError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type mcpInitResult struct {
+	ProtocolVersion string            `json:"protocolVersion"`
+	ServerInfo      mcpServerInfoResp `json:"serverInfo"`
+}
+
+type mcpServerInfoResp struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 const maxLogEntries = 500
@@ -217,7 +231,10 @@ func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) 
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
+	startTime := time.Now()
+
 	if err := cmd.Start(); err != nil {
+		info.CheckDuration = time.Since(startTime).Milliseconds()
 		m.addLog(info, "error", fmt.Sprintf("Failed to start: %v", err))
 		return fmt.Errorf("start: %w", err)
 	}
@@ -261,11 +278,21 @@ func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) 
 
 	if initResp.Error != nil {
 		cancel()
+		info.CheckDuration = time.Since(startTime).Milliseconds()
 		m.addLog(info, "error", fmt.Sprintf("Initialize error: %s", initResp.Error.Message))
 		return fmt.Errorf("initialize: %s", initResp.Error.Message)
 	}
 
-	m.addLog(info, "info", "MCP initialized successfully")
+	// Extract server info from initialize result
+	var initResult mcpInitResult
+	if err := json.Unmarshal(initResp.Result, &initResult); err == nil {
+		info.ServerName = initResult.ServerInfo.Name
+		info.ServerVersion = initResult.ServerInfo.Version
+		info.ProtocolVersion = initResult.ProtocolVersion
+	}
+
+	m.addLog(info, "info", fmt.Sprintf("MCP initialized: %s %s (protocol %s)",
+		info.ServerName, info.ServerVersion, info.ProtocolVersion))
 
 	// Send initialized notification
 	notif := `{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
@@ -308,7 +335,9 @@ func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) 
 	cancel()
 	cmd.Wait()
 	<-stderrDone
-	m.addLog(info, "info", "Check completed, process stopped")
+
+	info.CheckDuration = time.Since(startTime).Milliseconds()
+	m.addLog(info, "info", fmt.Sprintf("Check completed in %dms, process stopped", info.CheckDuration))
 
 	return nil
 }

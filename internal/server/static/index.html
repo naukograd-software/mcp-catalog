@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #12151c;
+    --surface2: #1a1e28;
+    --border: #2a2f3d;
+    --border-active: #3d4455;
+    --text: #c8cdd8;
+    --text-dim: #6b7280;
+    --text-bright: #e8ecf4;
+    --accent: #22d3ee;
+    --accent-dim: #0e7490;
+    --green: #34d399;
+    --green-dim: #065f46;
+    --red: #f87171;
+    --red-dim: #7f1d1d;
+    --yellow: #fbbf24;
+    --yellow-dim: #78350f;
+    --purple: #a78bfa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+
+  .logo span {
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  .ws-indicator {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background 0.3s;
+  }
+
+  .ws-indicator.connected { background: var(--green); }
+
+  .topbar-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Buttons */
+  .btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .btn.primary:hover { background: var(--accent); color: var(--bg); }
+  .btn.danger { border-color: var(--red-dim); color: var(--red); }
+  .btn.danger:hover { background: var(--red-dim); }
+  .btn.small { padding: 3px 8px; font-size: 10px; }
+
+  /* Layout */
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: calc(100vh - 49px);
+  }
+
+  /* Server list sidebar */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    background: var(--surface);
+  }
+
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sidebar-header h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+  }
+
+  .server-item {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+    position: relative;
+  }
+
+  .server-item:hover { background: var(--surface2); }
+  .server-item.active { background: var(--surface2); border-left: 2px solid var(--accent); }
+
+  .server-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .server-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  .status-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  .status-healthy { background: var(--green-dim); color: var(--green); }
+  .status-unchecked { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+  .status-error { background: var(--red-dim); color: var(--red); }
+  .status-checking { background: var(--yellow-dim); color: var(--yellow); }
+
+  .server-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .server-meta .tool-count {
+    color: var(--purple);
+  }
+
+  /* Main content */
+  .main {
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-dim);
+    gap: 12px;
+  }
+
+  .empty-state .icon { font-size: 48px; opacity: 0.3; }
+
+  /* Server detail */
+  .detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  .detail-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-bright);
+  }
+
+  .detail-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Sections */
+  .section {
+    margin-bottom: 24px;
+  }
+
+  .section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Info grid */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+  }
+
+  .info-card label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .info-card .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-bright);
+    word-break: break-all;
+  }
+
+  /* Tools grid */
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+  }
+
+  .tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    transition: border-color 0.15s;
+  }
+
+  .tool-card:hover { border-color: var(--accent-dim); }
+
+  .tool-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .tool-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  /* Log viewer */
+  .log-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  .log-entry {
+    padding: 4px 12px;
+    border-bottom: 1px solid rgba(42,47,61,0.5);
+    display: flex;
+    gap: 10px;
+    line-height: 1.6;
+  }
+
+  .log-entry:hover { background: var(--surface2); }
+
+  .log-time {
+    color: var(--text-dim);
+    white-space: nowrap;
+    min-width: 80px;
+  }
+
+  .log-level {
+    min-width: 50px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 9px;
+    padding-top: 2px;
+  }
+
+  .log-level.info { color: var(--accent); }
+  .log-level.warn { color: var(--yellow); }
+  .log-level.error { color: var(--red); }
+  .log-level.stderr { color: var(--yellow); }
+
+  .log-msg {
+    color: var(--text);
+    word-break: break-all;
+    flex: 1;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+
+  .modal h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    color: var(--text-bright);
+    margin-bottom: 20px;
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-group label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  input, textarea, select {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-bright);
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus, textarea:focus { border-color: var(--accent); }
+
+  textarea { resize: vertical; min-height: 120px; }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 20px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 10px 20px;
+    cursor: pointer;
+    color: var(--text-dim);
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Apply modal */
+  .apply-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .apply-tool {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .apply-tool:hover { border-color: var(--accent); }
+  .apply-tool.selected { border-color: var(--accent); background: var(--accent-dim); }
+
+  .apply-tool .name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+
+  .code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    position: relative;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+
+  /* Toggle */
+  .toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    display: inline-block;
+  }
+
+  .toggle input { display: none; }
+
+  .toggle .slider {
+    position: absolute;
+    inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .toggle .slider::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    top: 2px; left: 2px;
+    transition: all 0.2s;
+  }
+
+  .toggle input:checked + .slider { background: var(--accent-dim); border-color: var(--accent); }
+  .toggle input:checked + .slider::after { transform: translateX(16px); background: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    z-index: 2000;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { max-height: 40vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">MCP<span>MANAGER</span></div>
+    <div id="wsIndicator" class="ws-indicator"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn" onclick="showSettingsModal()">⚙ Settings</button>
+    <button class="btn" onclick="showApplyModal()">⚡ Apply to CLI</button>
+    <button class="btn" onclick="exportConfig()">↓ Export</button>
+    <button class="btn" onclick="showImportModal()">↑ Import</button>
+    <button class="btn primary" onclick="showAddModal()">+ Add Server</button>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h3>MCP Servers</h3>
+      <span id="serverCount" style="font-family:'JetBrains Mono';font-size:11px;color:var(--text-dim)">0</span>
+    </div>
+    <div id="serverList"></div>
+  </div>
+  <div class="main" id="mainContent">
+    <div class="empty-state">
+      <div class="icon">⬡</div>
+      <div>Select a server or add a new one</div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="addModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('addModal')">
+  <div class="modal">
+    <h2 id="addModalTitle">Add MCP Server</h2>
+    <div id="addFormMode">
+      <div class="tabs">
+        <div class="tab active" onclick="switchAddTab('form',this)">Form</div>
+        <div class="tab" onclick="switchAddTab('json',this)">JSON</div>
+      </div>
+    </div>
+    <div id="addFormFields">
+      <div class="form-group">
+        <label>Server Name</label>
+        <input id="serverNameInput" placeholder="e.g. filesystem, brave-search" />
+      </div>
+      <div class="form-group">
+        <label>Command</label>
+        <input id="serverCommandInput" placeholder="e.g. npx, uvx, node" />
+      </div>
+      <div class="form-group">
+        <label>Arguments (one per line)</label>
+        <textarea id="serverArgsInput" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/home/user"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Environment Variables (KEY=VALUE per line)</label>
+        <textarea id="serverEnvInput" rows="2" placeholder="API_KEY=xxx&#10;DEBUG=true"></textarea>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:12px">
+        <label style="margin:0">Enabled</label>
+        <label class="toggle">
+          <input type="checkbox" id="serverEnabledInput" checked />
+          <div class="slider"></div>
+        </label>
+      </div>
+    </div>
+    <div id="addJsonFields" style="display:none">
+      <div class="form-group">
+        <label>Paste full JSON config (mcpServers format)</label>
+        <textarea id="jsonInput" rows="12" placeholder='{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"],
+      "enabled": true
+    }
+  }
+}'></textarea>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('addModal')">Cancel</button>
+      <button class="btn primary" onclick="saveServer()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div id="importModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('importModal')">
+  <div class="modal">
+    <h2>Import Configuration</h2>
+    <div class="form-group">
+      <label>Paste JSON config</label>
+      <textarea id="importInput" rows="15" placeholder='Paste your mcpServers JSON here...'></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn primary" onclick="importConfig()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Apply Modal -->
+<div id="applyModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('applyModal')">
+  <div class="modal">
+    <h2>Apply to CLI Tool</h2>
+    <div class="apply-grid">
+      <div class="apply-tool selected" onclick="selectApplyTool('claude',this)">
+        <div class="name">Claude</div>
+      </div>
+      <div class="apply-tool" onclick="selectApplyTool('codex',this)">
+        <div class="name">Codex</div>
+      </div>
+      <div class="apply-tool" onclick="selectApplyTool('gemini',this)">
+        <div class="name">Gemini</div>
+      </div>
+      <div class="apply-tool" onclick="selectApplyTool('koli',this)">
+        <div class="name">Koli</div>
+      </div>
+      <div class="apply-tool" onclick="selectApplyTool('open-code',this)">
+        <div class="name">Open Code</div>
+      </div>
+    </div>
+    <div id="applyOutput" class="code-block" style="position:relative">
+      Select a tool to see the config...
+    </div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn" onclick="closeModal('applyModal')">Close</button>
+      <button class="btn primary" onclick="copyApplyOutput()">Copy to Clipboard</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('settingsModal')">
+  <div class="modal" style="max-width:480px">
+    <h2>Settings</h2>
+    <div class="form-group">
+      <label>Health Check Interval (seconds)</label>
+      <select id="healthIntervalInput" style="width:100%">
+        <option value="0">Disabled</option>
+        <option value="5">5 seconds</option>
+        <option value="10">10 seconds</option>
+        <option value="30">30 seconds</option>
+        <option value="60">60 seconds</option>
+      </select>
+    </div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">
+      Periodically checks if server processes are still alive. Set to 0 to disable.
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('settingsModal')">Cancel</button>
+      <button class="btn primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // State
+  let servers = {};
+  let selectedServer = null;
+  let ws = null;
+  let addMode = 'form'; // 'form' or 'json'
+  let selectedApplyTool = 'claude';
+  let editingServer = null;
+
+  // WebSocket
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+    ws.onopen = () => {
+      document.getElementById('wsIndicator').classList.add('connected');
+    };
+
+    ws.onclose = () => {
+      document.getElementById('wsIndicator').classList.remove('connected');
+      setTimeout(connectWS, 2000);
+    };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'initial') {
+        servers = msg.servers || {};
+        renderServerList();
+        if (selectedServer && servers[selectedServer]) {
+          renderDetail(selectedServer);
+        }
+      } else if (msg.type === 'server_update') {
+        servers[msg.name] = msg.server;
+        renderServerList();
+        if (selectedServer === msg.name) {
+          renderDetail(msg.name);
+        }
+      }
+    };
+  }
+
+  // API
+  async function api(method, path, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text);
+    }
+    return res.json();
+  }
+
+  // Render server list
+  function renderServerList() {
+    const el = document.getElementById('serverList');
+    const names = Object.keys(servers).sort();
+    document.getElementById('serverCount').textContent = names.length;
+
+    el.innerHTML = names.map(name => {
+      const s = servers[name];
+      const active = selectedServer === name ? 'active' : '';
+      const toolCount = s.tools ? s.tools.length : 0;
+      return `
+        <div class="server-item ${active}" onclick="selectServer('${name}')">
+          <div class="server-item-header">
+            <span class="server-name">${name}</span>
+            <span class="status-badge status-${s.status}">${s.status}</span>
+          </div>
+          <div class="server-meta">
+            ${s.config.command} · <span class="tool-count">${toolCount} tools</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Select server
+  function selectServer(name) {
+    selectedServer = name;
+    renderServerList();
+    renderDetail(name);
+  }
+
+  // Render server detail
+  function renderDetail(name) {
+    const s = servers[name];
+    if (!s) return;
+
+    const main = document.getElementById('mainContent');
+    const lastCheck = s.lastCheck ? new Date(s.lastCheck).toLocaleString() : '—';
+    const args = (s.config.args || []).join(' ');
+    const env = s.config.env ? Object.entries(s.config.env).map(([k,v]) => `${k}=${v}`).join(', ') : '—';
+    const checking = s.status === 'checking';
+
+    main.innerHTML = `
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">${name}</div>
+        </div>
+        <div class="detail-actions">
+          <button class="btn primary" onclick="checkServer('${name}')" ${checking ? 'disabled' : ''}>
+            ${checking ? '↻ Checking...' : '↻ Check'}
+          </button>
+          <button class="btn" onclick="editServer('${name}')">✎ Edit</button>
+          <button class="btn danger" onclick="deleteServer('${name}')">✕ Delete</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Configuration</div>
+        <div class="info-grid">
+          <div class="info-card">
+            <label>Status</label>
+            <div class="value"><span class="status-badge status-${s.status}">${s.status}</span></div>
+          </div>
+          <div class="info-card">
+            <label>Command</label>
+            <div class="value">${s.config.command}</div>
+          </div>
+          <div class="info-card">
+            <label>Arguments</label>
+            <div class="value">${args || '—'}</div>
+          </div>
+          <div class="info-card">
+            <label>Last Check</label>
+            <div class="value">${lastCheck}</div>
+          </div>
+          <div class="info-card">
+            <label>Env</label>
+            <div class="value">${env}</div>
+          </div>
+        </div>
+      </div>
+
+      ${s.tools && s.tools.length > 0 ? `
+      <div class="section">
+        <div class="section-title">Tools (${s.tools.length})</div>
+        <div class="tools-grid">
+          ${s.tools.map(t => `
+            <div class="tool-card">
+              <div class="tool-name">${t.name}</div>
+              <div class="tool-desc">${t.description || 'No description'}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : `
+      <div class="section">
+        <div class="section-title">Tools</div>
+        <div style="color:var(--text-dim);font-size:13px">
+          ${s.status === 'checking' ? 'Checking...' : 'Run check to discover tools'}
+        </div>
+      </div>
+      `}
+
+      <div class="section">
+        <div class="section-title">Logs</div>
+        <div class="log-container" id="logContainer">
+          ${(s.logs || []).map(l => `
+            <div class="log-entry">
+              <span class="log-time">${new Date(l.time).toLocaleTimeString()}</span>
+              <span class="log-level ${l.level}">${l.level}</span>
+              <span class="log-msg">${escapeHtml(l.message)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    // Auto-scroll logs
+    const logEl = document.getElementById('logContainer');
+    if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // Server actions
+  async function checkServer(name) {
+    try {
+      await api('POST', `/api/servers/${name}/check`);
+      toast('Checking ' + name);
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  async function deleteServer(name) {
+    if (!confirm(`Delete server "${name}"?`)) return;
+    try {
+      await api('DELETE', `/api/servers/${name}`);
+      delete servers[name];
+      selectedServer = null;
+      renderServerList();
+      document.getElementById('mainContent').innerHTML = `
+        <div class="empty-state">
+          <div class="icon">⬡</div>
+          <div>Select a server or add a new one</div>
+        </div>
+      `;
+      toast('Deleted ' + name);
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  // Add/Edit modal
+  function showAddModal() {
+    editingServer = null;
+    document.getElementById('addModalTitle').textContent = 'Add MCP Server';
+    document.getElementById('serverNameInput').value = '';
+    document.getElementById('serverNameInput').disabled = false;
+    document.getElementById('serverCommandInput').value = '';
+    document.getElementById('serverArgsInput').value = '';
+    document.getElementById('serverEnvInput').value = '';
+    document.getElementById('serverEnabledInput').checked = true;
+    document.getElementById('jsonInput').value = '';
+    switchAddTab('form', document.querySelector('.tabs .tab'));
+    document.getElementById('addModal').style.display = 'flex';
+  }
+
+  function editServer(name) {
+    const s = servers[name];
+    if (!s) return;
+    editingServer = name;
+    document.getElementById('addModalTitle').textContent = 'Edit: ' + name;
+    document.getElementById('serverNameInput').value = name;
+    document.getElementById('serverNameInput').disabled = true;
+    document.getElementById('serverCommandInput').value = s.config.command;
+    document.getElementById('serverArgsInput').value = (s.config.args || []).join('\n');
+    document.getElementById('serverEnvInput').value = s.config.env ?
+      Object.entries(s.config.env).map(([k,v]) => `${k}=${v}`).join('\n') : '';
+    document.getElementById('serverEnabledInput').checked = s.config.enabled;
+    switchAddTab('form', document.querySelector('.tabs .tab'));
+    document.getElementById('addModal').style.display = 'flex';
+  }
+
+  function switchAddTab(tab, el) {
+    addMode = tab;
+    document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('addFormFields').style.display = tab === 'form' ? 'block' : 'none';
+    document.getElementById('addJsonFields').style.display = tab === 'json' ? 'block' : 'none';
+  }
+
+  async function saveServer() {
+    if (addMode === 'json') {
+      try {
+        const data = JSON.parse(document.getElementById('jsonInput').value);
+        const mcps = data.mcpServers || data;
+        for (const [name, cfg] of Object.entries(mcps)) {
+          if (cfg.enabled === undefined) cfg.enabled = true;
+          await api('PUT', `/api/servers/${name}`, cfg);
+        }
+        closeModal('addModal');
+        toast('Servers added');
+        refreshAll();
+      } catch (e) { toast('Error: ' + e.message); }
+      return;
+    }
+
+    const name = document.getElementById('serverNameInput').value.trim();
+    const command = document.getElementById('serverCommandInput').value.trim();
+    if (!name || !command) { toast('Name and command required'); return; }
+
+    const args = document.getElementById('serverArgsInput').value.split('\n').filter(a => a.trim());
+    const envLines = document.getElementById('serverEnvInput').value.split('\n').filter(a => a.trim());
+    const env = {};
+    envLines.forEach(l => {
+      const i = l.indexOf('=');
+      if (i > 0) env[l.slice(0, i)] = l.slice(i + 1);
+    });
+
+    const srv = {
+      command,
+      args,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      enabled: document.getElementById('serverEnabledInput').checked,
+    };
+
+    try {
+      await api('PUT', `/api/servers/${name}`, srv);
+      closeModal('addModal');
+      toast(editingServer ? 'Updated ' + name : 'Added ' + name);
+      refreshAll();
+      setTimeout(() => selectServer(name), 500);
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  // Import/Export
+  async function exportConfig() {
+    try {
+      const res = await fetch('/api/config/export');
+      const data = await res.text();
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mcp-servers.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Config exported');
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  function showImportModal() {
+    document.getElementById('importInput').value = '';
+    document.getElementById('importModal').style.display = 'flex';
+  }
+
+  async function importConfig() {
+    try {
+      const data = JSON.parse(document.getElementById('importInput').value);
+      await api('POST', '/api/config/import', data);
+      closeModal('importModal');
+      toast('Config imported');
+      refreshAll();
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  // Apply to CLI
+  function showApplyModal() {
+    document.getElementById('applyModal').style.display = 'flex';
+    loadApplyConfig('claude');
+  }
+
+  function selectApplyTool(tool, el) {
+    selectedApplyTool = tool;
+    document.querySelectorAll('.apply-tool').forEach(t => t.classList.remove('selected'));
+    el.classList.add('selected');
+    loadApplyConfig(tool);
+  }
+
+  async function loadApplyConfig(tool) {
+    try {
+      const res = await fetch(`/api/apply/${tool}`);
+      const data = await res.text();
+      document.getElementById('applyOutput').textContent = data;
+    } catch (e) {
+      document.getElementById('applyOutput').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  function copyApplyOutput() {
+    const text = document.getElementById('applyOutput').textContent;
+    navigator.clipboard.writeText(text);
+    toast('Copied to clipboard');
+  }
+
+  // Utils
+  function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+  }
+
+  async function refreshAll() {
+    try {
+      const data = await api('GET', '/api/servers');
+      servers = data;
+      renderServerList();
+    } catch (e) {}
+  }
+
+  function toast(msg) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+
+  // Settings
+  async function showSettingsModal() {
+    try {
+      const data = await api('GET', '/api/settings');
+      const sel = document.getElementById('healthIntervalInput');
+      const val = String(data.healthCheckInterval || 0);
+      // Check if value matches one of the options
+      let found = false;
+      for (const opt of sel.options) {
+        if (opt.value === val) { found = true; break; }
+      }
+      if (!found) {
+        // Add custom option
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = val + ' seconds';
+        sel.appendChild(opt);
+      }
+      sel.value = val;
+    } catch (e) {}
+    document.getElementById('settingsModal').style.display = 'flex';
+  }
+
+  async function saveSettings() {
+    const interval = parseInt(document.getElementById('healthIntervalInput').value, 10) || 0;
+    try {
+      await api('PUT', '/api/settings', { healthCheckInterval: interval });
+      closeModal('settingsModal');
+      toast('Settings saved');
+    } catch (e) { toast('Error: ' + e.message); }
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none');
+    }
+  });
+
+  // Init
+  connectWS();
+  refreshAll();
+</script>
+</body>
+</html>

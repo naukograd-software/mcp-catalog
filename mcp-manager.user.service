@@ -1,0 +1,12 @@
+[Unit]
+Description=MCP Manager - MCP Server Management Dashboard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/mcp-manager --port 9847
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -466,6 +466,54 @@
     color: var(--text-bright);
   }
 
+  /* Diff view */
+  .diff-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .diff-pane {
+    min-width: 0;
+  }
+
+  .diff-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .diff-header-new {
+    color: var(--accent);
+  }
+
+  .diff-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre;
+    overflow: auto;
+    max-height: 400px;
+    margin: 0;
+  }
+
+  @media (max-width: 768px) {
+    .diff-container { grid-template-columns: 1fr; }
+  }
+
   .code-block {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -673,31 +721,26 @@
 
 <!-- Apply Modal -->
 <div id="applyModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('applyModal')">
-  <div class="modal">
+  <div class="modal" style="max-width:1100px">
     <h2>Apply to CLI Tool</h2>
-    <div class="apply-grid">
-      <div class="apply-tool selected" onclick="selectApplyTool('claude',this)">
-        <div class="name">Claude</div>
-      </div>
-      <div class="apply-tool" onclick="selectApplyTool('codex',this)">
-        <div class="name">Codex</div>
-      </div>
-      <div class="apply-tool" onclick="selectApplyTool('gemini',this)">
-        <div class="name">Gemini</div>
-      </div>
-      <div class="apply-tool" onclick="selectApplyTool('koli',this)">
-        <div class="name">Koli</div>
-      </div>
-      <div class="apply-tool" onclick="selectApplyTool('open-code',this)">
-        <div class="name">Open Code</div>
-      </div>
+    <div id="applyToolsGrid" class="apply-grid">
+      Loading...
     </div>
-    <div id="applyOutput" class="code-block" style="position:relative">
-      Select a tool to see the config...
-    </div>
-    <div class="form-actions" style="margin-top:16px">
-      <button class="btn" onclick="closeModal('applyModal')">Close</button>
-      <button class="btn primary" onclick="copyApplyOutput()">Copy to Clipboard</button>
+    <div id="applyDiffContainer" style="display:none">
+      <div class="diff-container">
+        <div class="diff-pane">
+          <div class="diff-header" id="diffCurrentHeader">Current</div>
+          <pre class="diff-code" id="diffCurrentCode"></pre>
+        </div>
+        <div class="diff-pane">
+          <div class="diff-header diff-header-new">Proposed</div>
+          <pre class="diff-code" id="diffProposedCode"></pre>
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn" onclick="closeModal('applyModal')">Close</button>
+        <button class="btn primary" id="applyBtn" onclick="applyToTool()">Apply</button>
+      </div>
     </div>
   </div>
 </div>
@@ -732,7 +775,6 @@
   let selectedServer = null;
   let ws = null;
   let addMode = 'form'; // 'form' or 'json'
-  let selectedApplyTool = 'claude';
   let editingServer = null;
 
   // WebSocket
@@ -1093,32 +1135,67 @@
   }
 
   // Apply to CLI
-  function showApplyModal() {
+  let detectedTools = [];
+  let selectedApplyTool = null;
+
+  async function showApplyModal() {
+    document.getElementById('applyDiffContainer').style.display = 'none';
     document.getElementById('applyModal').style.display = 'flex';
-    loadApplyConfig('claude');
-  }
+    selectedApplyTool = null;
 
-  function selectApplyTool(tool, el) {
-    selectedApplyTool = tool;
-    document.querySelectorAll('.apply-tool').forEach(t => t.classList.remove('selected'));
-    el.classList.add('selected');
-    loadApplyConfig(tool);
-  }
-
-  async function loadApplyConfig(tool) {
     try {
-      const res = await fetch(`/api/apply/${tool}`);
-      const data = await res.text();
-      document.getElementById('applyOutput').textContent = data;
+      const tools = await api('GET', '/api/tools');
+      detectedTools = tools || [];
+      renderToolChips();
     } catch (e) {
-      document.getElementById('applyOutput').textContent = 'Error: ' + e.message;
+      document.getElementById('applyToolsGrid').innerHTML =
+        '<div style="color:var(--red)">Failed to detect tools</div>';
     }
   }
 
-  function copyApplyOutput() {
-    const text = document.getElementById('applyOutput').textContent;
-    navigator.clipboard.writeText(text);
-    toast('Copied to clipboard');
+  function renderToolChips() {
+    const grid = document.getElementById('applyToolsGrid');
+    if (detectedTools.length === 0) {
+      grid.innerHTML = '<div style="color:var(--text-dim)">No CLI tools detected</div>';
+      return;
+    }
+    grid.innerHTML = detectedTools.map(t => `
+      <div class="apply-tool ${selectedApplyTool === t.name ? 'selected' : ''}"
+           onclick="selectApplyTool('${t.name}')">
+        <div class="name">${t.displayName}</div>
+      </div>
+    `).join('');
+  }
+
+  async function selectApplyTool(name) {
+    selectedApplyTool = name;
+    renderToolChips();
+    document.getElementById('applyDiffContainer').style.display = 'block';
+    document.getElementById('diffCurrentCode').textContent = 'Loading...';
+    document.getElementById('diffProposedCode').textContent = 'Loading...';
+
+    try {
+      const diff = await api('GET', `/api/tools/${name}/diff`);
+      document.getElementById('diffCurrentHeader').textContent =
+        'Current: ' + diff.configPath;
+      document.getElementById('diffCurrentCode').textContent =
+        diff.current || '(file does not exist)';
+      document.getElementById('diffProposedCode').textContent =
+        diff.proposed;
+    } catch (e) {
+      document.getElementById('diffCurrentCode').textContent = 'Error: ' + e.message;
+      document.getElementById('diffProposedCode').textContent = '';
+    }
+  }
+
+  async function applyToTool() {
+    if (!selectedApplyTool) return;
+    try {
+      await api('POST', `/api/tools/${selectedApplyTool}/apply`);
+      toast('Applied to ' + selectedApplyTool);
+      // Refresh diff to show updated current
+      selectApplyTool(selectedApplyTool);
+    } catch (e) { toast('Error: ' + e.message); }
   }
 
   // Utils

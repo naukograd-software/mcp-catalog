@@ -3,7 +3,6 @@ package server
 import (
 	"embed"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -57,7 +56,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/config/export", s.handleExport)
 	mux.HandleFunc("/api/config/import", s.handleImport)
-	mux.HandleFunc("/api/apply/", s.handleApply)
+	mux.HandleFunc("/api/tools", s.handleTools)
+	mux.HandleFunc("/api/tools/", s.handleToolAction)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/ws", s.handleWS)
 
@@ -203,16 +203,53 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// GET /api/apply/{tool}
-func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
-	tool := strings.TrimPrefix(r.URL.Path, "/api/apply/")
-	result, err := s.mgr.ApplyToCLI(tool)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+// GET /api/tools - list installed CLI tools
+func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", 405)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, result)
+	tools := s.mgr.DetectTools()
+	writeJSON(w, tools)
+}
+
+// /api/tools/{name}/diff, /api/tools/{name}/apply
+func (s *Server) handleToolAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/tools/")
+	parts := strings.SplitN(path, "/", 2)
+	name := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "diff":
+		if r.Method != "GET" {
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		diff, err := s.mgr.PreviewApply(name)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, diff)
+
+	case "apply":
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		if err := s.mgr.ApplyToTool(name); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "unknown action", 400)
+	}
 }
 
 // GET/PUT /api/settings

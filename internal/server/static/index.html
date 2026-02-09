@@ -995,7 +995,7 @@
     editingServer = name;
     document.getElementById('addModalTitle').textContent = 'Edit: ' + name;
     document.getElementById('serverNameInput').value = name;
-    document.getElementById('serverNameInput').disabled = true;
+    document.getElementById('serverNameInput').disabled = false;
     document.getElementById('serverCommandInput').value = s.config.command;
     document.getElementById('serverArgsInput').value = (s.config.args || []).join('\n');
     document.getElementById('serverEnvInput').value = s.config.env ?
@@ -1070,9 +1070,14 @@
     };
 
     try {
+      // If renaming, delete old server first
+      if (editingServer && editingServer !== name) {
+        await api('DELETE', `/api/servers/${editingServer}`);
+      }
       await api('PUT', `/api/servers/${name}`, srv);
       closeModal('addModal');
-      toast(editingServer ? 'Updated ' + name : 'Added ' + name);
+      const action = !editingServer ? 'Added' : editingServer !== name ? 'Renamed to' : 'Updated';
+      toast(`${action} ${name}`);
       refreshAll();
       setTimeout(() => selectServer(name), 500);
     } catch (e) { toast('Error: ' + e.message); }

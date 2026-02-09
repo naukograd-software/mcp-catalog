@@ -643,6 +643,19 @@
   </div>
 </div>
 
+<!-- Export Modal -->
+<div id="exportModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('exportModal')">
+  <div class="modal">
+    <h2>Export Configuration</h2>
+    <div class="code-block" id="exportOutput" style="position:relative;min-height:120px">Loading...</div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn" onclick="closeModal('exportModal')">Close</button>
+      <button class="btn" onclick="downloadExport()">↓ Download</button>
+      <button class="btn primary" onclick="copyExport()">Copy to Clipboard</button>
+    </div>
+  </div>
+</div>
+
 <!-- Import Modal -->
 <div id="importModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('importModal')">
   <div class="modal">
@@ -958,17 +971,38 @@
     document.getElementById('addJsonFields').style.display = tab === 'json' ? 'block' : 'none';
   }
 
+  // Extract servers from mixed JSON format:
+  // handles { mcpServers: { ... } }, flat { name: { command, ... } },
+  // and mixed (both mcpServers + top-level entries)
+  function extractServers(data) {
+    const result = {};
+    if (data.mcpServers && typeof data.mcpServers === 'object') {
+      Object.assign(result, data.mcpServers);
+    }
+    for (const [key, val] of Object.entries(data)) {
+      if (key === 'mcpServers' || key === 'healthCheckInterval') continue;
+      if (val && typeof val === 'object' && val.command) {
+        result[key] = val;
+      }
+    }
+    return result;
+  }
+
   async function saveServer() {
     if (addMode === 'json') {
       try {
         const data = JSON.parse(document.getElementById('jsonInput').value);
-        const mcps = data.mcpServers || data;
+        const mcps = extractServers(data);
+        if (Object.keys(mcps).length === 0) {
+          toast('No servers found in JSON');
+          return;
+        }
         for (const [name, cfg] of Object.entries(mcps)) {
           if (cfg.enabled === undefined) cfg.enabled = true;
           await api('PUT', `/api/servers/${name}`, cfg);
         }
         closeModal('addModal');
-        toast('Servers added');
+        toast(`Added ${Object.keys(mcps).length} server(s)`);
         refreshAll();
       } catch (e) { toast('Error: ' + e.message); }
       return;
@@ -1004,18 +1038,35 @@
 
   // Import/Export
   async function exportConfig() {
+    document.getElementById('exportOutput').textContent = 'Loading...';
+    document.getElementById('exportModal').style.display = 'flex';
     try {
       const res = await fetch('/api/config/export');
       const data = await res.text();
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'mcp-servers.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('Config exported');
-    } catch (e) { toast('Error: ' + e.message); }
+      // Pretty-print
+      const pretty = JSON.stringify(JSON.parse(data), null, 2);
+      document.getElementById('exportOutput').textContent = pretty;
+    } catch (e) {
+      document.getElementById('exportOutput').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  function copyExport() {
+    const text = document.getElementById('exportOutput').textContent;
+    navigator.clipboard.writeText(text);
+    toast('Copied to clipboard');
+  }
+
+  function downloadExport() {
+    const text = document.getElementById('exportOutput').textContent;
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mcp-servers.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Config downloaded');
   }
 
   function showImportModal() {
@@ -1026,9 +1077,17 @@
   async function importConfig() {
     try {
       const data = JSON.parse(document.getElementById('importInput').value);
-      await api('POST', '/api/config/import', data);
+      const mcps = extractServers(data);
+      if (Object.keys(mcps).length === 0) {
+        toast('No servers found in JSON');
+        return;
+      }
+      for (const [name, cfg] of Object.entries(mcps)) {
+        if (cfg.enabled === undefined) cfg.enabled = true;
+        await api('PUT', `/api/servers/${name}`, cfg);
+      }
       closeModal('importModal');
-      toast('Config imported');
+      toast(`Imported ${Object.keys(mcps).length} server(s)`);
       refreshAll();
     } catch (e) { toast('Error: ' + e.message); }
   }

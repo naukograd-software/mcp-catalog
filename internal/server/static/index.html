@@ -821,6 +821,14 @@
     return res.json();
   }
 
+  function configSummary(cfg) {
+    if (!cfg) return '—';
+    if (cfg.type === 'streamableHttp' && cfg.url) return `streamableHttp ${cfg.url}`;
+    if (cfg.command) return cfg.command;
+    if (cfg.url) return cfg.url;
+    return '—';
+  }
+
   // Render server list
   function renderServerList() {
     const el = document.getElementById('serverList');
@@ -838,7 +846,7 @@
             <span class="status-badge status-${s.status}">${s.status}</span>
           </div>
           <div class="server-meta">
-            ${s.config.command} · <span class="tool-count">${toolCount} tools</span>
+            ${escapeHtml(configSummary(s.config))} · <span class="tool-count">${toolCount} tools</span>
           </div>
           ${s.status === 'error' && s.error ? `<div class="server-meta" style="color:var(--red);margin-top:4px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.error)}</div>` : ''}
         </div>
@@ -862,6 +870,7 @@
     const lastCheck = s.lastCheck ? new Date(s.lastCheck).toLocaleString() : '—';
     const args = (s.config.args || []).join(' ');
     const env = s.config.env ? Object.entries(s.config.env).map(([k,v]) => `${k}=${v}`).join(', ') : '—';
+    const cfgType = s.config.type || (s.config.command ? 'stdio' : '—');
     const checking = s.status === 'checking';
     const serverLabel = s.serverName ? `${s.serverName}${s.serverVersion ? ' v' + s.serverVersion : ''}` : '—';
     const duration = s.checkDuration ? s.checkDuration + 'ms' : '—';
@@ -918,16 +927,24 @@
         <div class="section-title">Configuration</div>
         <div class="info-grid">
           <div class="info-card">
+            <label>Type</label>
+            <div class="value">${escapeHtml(cfgType)}</div>
+          </div>
+          <div class="info-card">
+            <label>URL</label>
+            <div class="value">${escapeHtml(s.config.url || '—')}</div>
+          </div>
+          <div class="info-card">
             <label>Command</label>
-            <div class="value">${s.config.command}</div>
+            <div class="value">${escapeHtml(s.config.command || '—')}</div>
           </div>
           <div class="info-card">
             <label>Arguments</label>
-            <div class="value">${args || '—'}</div>
+            <div class="value">${escapeHtml(args || '—')}</div>
           </div>
           <div class="info-card">
             <label>Env</label>
-            <div class="value">${env}</div>
+            <div class="value">${escapeHtml(env)}</div>
           </div>
         </div>
       </div>
@@ -1025,7 +1042,7 @@
     document.getElementById('addModalTitle').textContent = 'Edit: ' + name;
     document.getElementById('serverNameInput').value = name;
     document.getElementById('serverNameInput').disabled = false;
-    document.getElementById('serverCommandInput').value = s.config.command;
+    document.getElementById('serverCommandInput').value = s.config.command || '';
     document.getElementById('serverArgsInput').value = (s.config.args || []).join('\n');
     document.getElementById('serverEnvInput').value = s.config.env ?
       Object.entries(s.config.env).map(([k,v]) => `${k}=${v}`).join('\n') : '';
@@ -1052,7 +1069,7 @@
     }
     for (const [key, val] of Object.entries(data)) {
       if (key === 'mcpServers' || key === 'healthCheckInterval') continue;
-      if (val && typeof val === 'object' && val.command) {
+      if (val && typeof val === 'object' && (val.command || val.url || val.type === 'streamableHttp')) {
         result[key] = val;
       }
     }

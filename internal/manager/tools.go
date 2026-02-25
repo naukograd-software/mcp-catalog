@@ -143,14 +143,24 @@ func (m *Manager) enabledServersClean() map[string]any {
 		if !srv.Enabled {
 			continue
 		}
-		entry := map[string]any{
-			"command": srv.Command,
+		entry := make(map[string]any)
+		if srv.Type != "" {
+			entry["type"] = srv.Type
+		}
+		if srv.URL != "" {
+			entry["url"] = srv.URL
+		}
+		if srv.Command != "" {
+			entry["command"] = srv.Command
 		}
 		if len(srv.Args) > 0 {
 			entry["args"] = srv.Args
 		}
 		if len(srv.Env) > 0 {
 			entry["env"] = srv.Env
+		}
+		if len(entry) == 0 {
+			continue
 		}
 		result[name] = entry
 	}
@@ -215,6 +225,9 @@ func (m *Manager) proposedJSONOpenCode(current string) (string, error) {
 		if !srv.Enabled {
 			continue
 		}
+		if srv.Command == "" {
+			continue
+		}
 		cmd := []string{srv.Command}
 		cmd = append(cmd, srv.Args...)
 		entry := map[string]any{
@@ -254,6 +267,9 @@ func (m *Manager) proposedTOMLCodex(current string) (string, error) {
 
 	for name, srv := range cfg.MCPServers {
 		if !srv.Enabled {
+			continue
+		}
+		if srv.Command == "" {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))

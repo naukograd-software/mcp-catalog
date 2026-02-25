@@ -3,12 +3,15 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 )
 
 // MCPServer represents a single MCP server configuration
 // Compatible with Claude/Codex mcpServers format
 type MCPServer struct {
+	Type    string            `json:"type,omitempty"`
+	URL     string            `json:"url,omitempty"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
@@ -26,6 +29,30 @@ type Store struct {
 	mu     sync.RWMutex
 	path   string
 	config *Config
+}
+
+func normalizeServer(srv *MCPServer) {
+	if srv == nil {
+		return
+	}
+	srv.Type = strings.TrimSpace(srv.Type)
+	srv.URL = strings.TrimSpace(srv.URL)
+	srv.Command = strings.TrimSpace(srv.Command)
+	if srv.URL != "" && srv.Type == "" {
+		srv.Type = "streamableHttp"
+	}
+}
+
+func normalizeConfig(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.MCPServers == nil {
+		cfg.MCPServers = make(map[string]*MCPServer)
+	}
+	for _, srv := range cfg.MCPServers {
+		normalizeServer(srv)
+	}
 }
 
 func NewStore(path string) *Store {
@@ -53,9 +80,7 @@ func (s *Store) Load() error {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return err
 	}
-	if cfg.MCPServers == nil {
-		cfg.MCPServers = make(map[string]*MCPServer)
-	}
+	normalizeConfig(&cfg)
 	s.config = &cfg
 	return nil
 }
@@ -89,9 +114,7 @@ func (s *Store) Get() *Config {
 func (s *Store) Set(cfg *Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if cfg.MCPServers == nil {
-		cfg.MCPServers = make(map[string]*MCPServer)
-	}
+	normalizeConfig(cfg)
 	s.config = cfg
 	return s.saveLocked()
 }
@@ -99,6 +122,7 @@ func (s *Store) Set(cfg *Config) error {
 func (s *Store) AddServer(name string, srv *MCPServer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	normalizeServer(srv)
 	s.config.MCPServers[name] = srv
 	return s.saveLocked()
 }

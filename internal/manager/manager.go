@@ -2,9 +2,12 @@ package manager
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -177,7 +180,14 @@ func (m *Manager) Check(name string) error {
 	info.Error = ""
 	info.Config = *srv
 	m.mu.Unlock()
-	m.addLog(info, "info", fmt.Sprintf("Checking: %s %s", srv.Command, strings.Join(srv.Args, " ")))
+	target := strings.TrimSpace(strings.Join(append([]string{srv.Command}, srv.Args...), " "))
+	if isStreamableHTTPServer(srv) {
+		target = fmt.Sprintf("streamableHttp %s", srv.URL)
+	}
+	if target == "" {
+		target = "(invalid config: no command/url)"
+	}
+	m.addLog(info, "info", fmt.Sprintf("Checking: %s", target))
 	m.notify(name, info)
 
 	// Run the actual check
@@ -200,6 +210,16 @@ func (m *Manager) Check(name string) error {
 }
 
 func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) error {
+	_ = name
+	if isStreamableHTTPServer(srv) {
+		return m.doCheckStreamableHTTP(srv, info)
+	}
+	if srv.Command == "" {
+		err := fmt.Errorf("missing command for stdio server")
+		m.addLog(info, "error", err.Error())
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 
@@ -340,6 +360,178 @@ func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) 
 	m.addLog(info, "info", fmt.Sprintf("Check completed in %dms, process stopped", info.CheckDuration))
 
 	return nil
+}
+
+func isStreamableHTTPServer(srv *config.MCPServer) bool {
+	if srv == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(srv.Type), "streamableHttp") {
+		return true
+	}
+	return strings.TrimSpace(srv.URL) != "" && strings.TrimSpace(srv.Command) == ""
+}
+
+func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo) error {
+	if srv.URL == "" {
+		err := fmt.Errorf("missing url for streamableHttp server")
+		m.addLog(info, "error", err.Error())
+		return err
+	}
+
+	startTime := time.Now()
+	m.addLog(info, "info", fmt.Sprintf("Connecting via streamable HTTP: %s", srv.URL))
+	client := &http.Client{Timeout: checkTimeout}
+
+	send := func(payload map[string]any, expectResponse bool) (*mcpResponse, error) {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("encode request: %w", err)
+		}
+
+		req, err := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("send request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			return nil, fmt.Errorf("http status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+
+		if !expectResponse {
+			io.Copy(io.Discard, resp.Body)
+			return nil, nil
+		}
+
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read response: %w", err)
+		}
+
+		parsed, err := decodeHTTPMCPResponse(raw)
+		if err != nil {
+			return nil, err
+		}
+		return parsed, nil
+	}
+
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "mcp-manager",
+				"version": "1.0.0",
+			},
+		},
+	}
+
+	initResp, err := send(initReq, true)
+	if err != nil {
+		info.CheckDuration = time.Since(startTime).Milliseconds()
+		m.addLog(info, "error", fmt.Sprintf("Initialize request failed: %v", err))
+		return fmt.Errorf("initialize request: %w", err)
+	}
+
+	if initResp.Error != nil {
+		info.CheckDuration = time.Since(startTime).Milliseconds()
+		m.addLog(info, "error", fmt.Sprintf("Initialize error: %s", initResp.Error.Message))
+		return fmt.Errorf("initialize: %s", initResp.Error.Message)
+	}
+
+	var initResult mcpInitResult
+	if err := json.Unmarshal(initResp.Result, &initResult); err == nil {
+		info.ServerName = initResult.ServerInfo.Name
+		info.ServerVersion = initResult.ServerInfo.Version
+		info.ProtocolVersion = initResult.ProtocolVersion
+	}
+	m.addLog(info, "info", fmt.Sprintf("MCP initialized: %s %s (protocol %s)",
+		info.ServerName, info.ServerVersion, info.ProtocolVersion))
+
+	notif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	}
+	if _, err := send(notif, false); err != nil {
+		m.addLog(info, "warn", fmt.Sprintf("Failed to send initialized notification: %v", err))
+	}
+
+	toolsReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	}
+	toolsResp, err := send(toolsReq, true)
+	if err != nil {
+		info.CheckDuration = time.Since(startTime).Milliseconds()
+		m.addLog(info, "warn", fmt.Sprintf("tools/list request failed: %v", err))
+		return nil
+	}
+
+	if toolsResp.Error != nil {
+		m.addLog(info, "warn", fmt.Sprintf("tools/list error: %s", toolsResp.Error.Message))
+	} else {
+		var result mcpToolsResult
+		if err := json.Unmarshal(toolsResp.Result, &result); err != nil {
+			m.addLog(info, "warn", fmt.Sprintf("Failed to parse tools: %v", err))
+		} else {
+			m.mu.Lock()
+			info.Tools = result.Tools
+			m.mu.Unlock()
+			m.addLog(info, "info", fmt.Sprintf("Discovered %d tools", len(result.Tools)))
+		}
+	}
+
+	info.CheckDuration = time.Since(startTime).Milliseconds()
+	m.addLog(info, "info", fmt.Sprintf("Check completed in %dms", info.CheckDuration))
+	return nil
+}
+
+func decodeHTTPMCPResponse(raw []byte) (*mcpResponse, error) {
+	data := strings.TrimSpace(string(raw))
+	if data == "" {
+		return nil, fmt.Errorf("empty response body")
+	}
+
+	var resp mcpResponse
+	if err := json.Unmarshal([]byte(data), &resp); err == nil && (resp.JSONRPC != "" || resp.Result != nil || resp.Error != nil) {
+		return &resp, nil
+	}
+
+	var batch []mcpResponse
+	if err := json.Unmarshal([]byte(data), &batch); err == nil && len(batch) > 0 {
+		return &batch[0], nil
+	}
+
+	// Fallback for SSE replies where payload comes as "data: {json}" lines.
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(payload), &resp); err == nil {
+			return &resp, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unable to decode MCP response: %s", data)
 }
 
 // CheckAll checks all enabled servers.

@@ -18,6 +18,7 @@ import (
 func main() {
 	port := flag.Int("port", 9847, "HTTP port")
 	configPath := flag.String("config", "", "Config file path (default: ~/.config/mcp-manager/config.json)")
+	mcpStdio := flag.Bool("mcp-stdio", false, "Run as MCP proxy over stdio")
 	flag.Parse()
 
 	if *configPath == "" {
@@ -37,6 +38,14 @@ func main() {
 
 	// Initialize manager
 	mgr := manager.New(store)
+
+	if *mcpStdio {
+		log.Printf("Starting MCP proxy over stdio")
+		if err := server.RunMCPStdio(store); err != nil {
+			log.Fatalf("Stdio MCP server error: %v", err)
+		}
+		return
+	}
 
 	// Initial health check for all enabled servers
 	go mgr.CheckAll()

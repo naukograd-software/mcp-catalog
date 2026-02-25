@@ -38,6 +38,8 @@ type ServerInfo struct {
 	Error           string           `json:"error,omitempty"`
 	Logs            []LogEntry       `json:"logs"`
 	Tools           []MCPTool        `json:"tools"`
+	Prompts         []MCPPrompt      `json:"prompts"`
+	Resources       []MCPResource    `json:"resources"`
 	LastCheck       *time.Time       `json:"lastCheck,omitempty"`
 	ServerName      string           `json:"serverName,omitempty"`
 	ServerVersion   string           `json:"serverVersion,omitempty"`
@@ -53,6 +55,26 @@ type MCPTool struct {
 
 type mcpToolsResult struct {
 	Tools []MCPTool `json:"tools"`
+}
+
+type MCPPrompt struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type mcpPromptsResult struct {
+	Prompts []MCPPrompt `json:"prompts"`
+}
+
+type MCPResource struct {
+	Name        string `json:"name,omitempty"`
+	URI         string `json:"uri"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+type mcpResourcesResult struct {
+	Resources []MCPResource `json:"resources"`
 }
 
 type mcpResponse struct {
@@ -140,11 +162,13 @@ func (m *Manager) getOrCreateInfo(name string) *ServerInfo {
 	}
 
 	info := &ServerInfo{
-		Name:   name,
-		Config: *srv,
-		Status: StatusUnchecked,
-		Logs:   make([]LogEntry, 0),
-		Tools:  make([]MCPTool, 0),
+		Name:      name,
+		Config:    *srv,
+		Status:    StatusUnchecked,
+		Logs:      make([]LogEntry, 0),
+		Tools:     make([]MCPTool, 0),
+		Prompts:   make([]MCPPrompt, 0),
+		Resources: make([]MCPResource, 0),
 	}
 	m.servers[name] = info
 	return info
@@ -351,6 +375,62 @@ func (m *Manager) doCheck(name string, srv *config.MCPServer, info *ServerInfo) 
 		}
 	}
 
+	// List prompts
+	promptsReq := `{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}` + "\n"
+	if _, err := stdin.Write([]byte(promptsReq)); err != nil {
+		m.addLog(info, "warn", fmt.Sprintf("Failed to send prompts/list: %v", err))
+	} else {
+		line, err = stdout.ReadString('\n')
+		if err != nil {
+			m.addLog(info, "warn", fmt.Sprintf("Failed to read prompts/list response: %v", err))
+		} else {
+			var promptsResp mcpResponse
+			if err := json.Unmarshal([]byte(line), &promptsResp); err != nil {
+				m.addLog(info, "warn", fmt.Sprintf("Invalid prompts/list response: %v", err))
+			} else if promptsResp.Error != nil {
+				m.addLog(info, "warn", fmt.Sprintf("prompts/list error: %s", promptsResp.Error.Message))
+			} else {
+				var result mcpPromptsResult
+				if err := json.Unmarshal(promptsResp.Result, &result); err != nil {
+					m.addLog(info, "warn", fmt.Sprintf("Failed to parse prompts: %v", err))
+				} else {
+					m.mu.Lock()
+					info.Prompts = result.Prompts
+					m.mu.Unlock()
+					m.addLog(info, "info", fmt.Sprintf("Discovered %d prompts", len(result.Prompts)))
+				}
+			}
+		}
+	}
+
+	// List resources
+	resourcesReq := `{"jsonrpc":"2.0","id":4,"method":"resources/list","params":{}}` + "\n"
+	if _, err := stdin.Write([]byte(resourcesReq)); err != nil {
+		m.addLog(info, "warn", fmt.Sprintf("Failed to send resources/list: %v", err))
+	} else {
+		line, err = stdout.ReadString('\n')
+		if err != nil {
+			m.addLog(info, "warn", fmt.Sprintf("Failed to read resources/list response: %v", err))
+		} else {
+			var resourcesResp mcpResponse
+			if err := json.Unmarshal([]byte(line), &resourcesResp); err != nil {
+				m.addLog(info, "warn", fmt.Sprintf("Invalid resources/list response: %v", err))
+			} else if resourcesResp.Error != nil {
+				m.addLog(info, "warn", fmt.Sprintf("resources/list error: %s", resourcesResp.Error.Message))
+			} else {
+				var result mcpResourcesResult
+				if err := json.Unmarshal(resourcesResp.Result, &result); err != nil {
+					m.addLog(info, "warn", fmt.Sprintf("Failed to parse resources: %v", err))
+				} else {
+					m.mu.Lock()
+					info.Resources = result.Resources
+					m.mu.Unlock()
+					m.addLog(info, "info", fmt.Sprintf("Discovered %d resources", len(result.Resources)))
+				}
+			}
+		}
+	}
+
 	// Kill the process
 	cancel()
 	cmd.Wait()
@@ -509,6 +589,52 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		}
 	}
 
+	promptsReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "prompts/list",
+		"params":  map[string]any{},
+	}
+	promptsResp, err := send(promptsReq, true, 3)
+	if err != nil {
+		m.addLog(info, "warn", fmt.Sprintf("prompts/list request failed: %v", err))
+	} else if promptsResp.Error != nil {
+		m.addLog(info, "warn", fmt.Sprintf("prompts/list error: %s", promptsResp.Error.Message))
+	} else {
+		var result mcpPromptsResult
+		if err := json.Unmarshal(promptsResp.Result, &result); err != nil {
+			m.addLog(info, "warn", fmt.Sprintf("Failed to parse prompts: %v", err))
+		} else {
+			m.mu.Lock()
+			info.Prompts = result.Prompts
+			m.mu.Unlock()
+			m.addLog(info, "info", fmt.Sprintf("Discovered %d prompts", len(result.Prompts)))
+		}
+	}
+
+	resourcesReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      4,
+		"method":  "resources/list",
+		"params":  map[string]any{},
+	}
+	resourcesResp, err := send(resourcesReq, true, 4)
+	if err != nil {
+		m.addLog(info, "warn", fmt.Sprintf("resources/list request failed: %v", err))
+	} else if resourcesResp.Error != nil {
+		m.addLog(info, "warn", fmt.Sprintf("resources/list error: %s", resourcesResp.Error.Message))
+	} else {
+		var result mcpResourcesResult
+		if err := json.Unmarshal(resourcesResp.Result, &result); err != nil {
+			m.addLog(info, "warn", fmt.Sprintf("Failed to parse resources: %v", err))
+		} else {
+			m.mu.Lock()
+			info.Resources = result.Resources
+			m.mu.Unlock()
+			m.addLog(info, "info", fmt.Sprintf("Discovered %d resources", len(result.Resources)))
+		}
+	}
+
 	info.CheckDuration = time.Since(startTime).Milliseconds()
 	m.addLog(info, "info", fmt.Sprintf("Check completed in %dms", info.CheckDuration))
 	return nil
@@ -657,11 +783,13 @@ func (m *Manager) GetInfo(name string) (*ServerInfo, bool) {
 			return nil, false
 		}
 		return &ServerInfo{
-			Name:   name,
-			Config: *srv,
-			Status: StatusUnchecked,
-			Logs:   []LogEntry{},
-			Tools:  []MCPTool{},
+			Name:      name,
+			Config:    *srv,
+			Status:    StatusUnchecked,
+			Logs:      []LogEntry{},
+			Tools:     []MCPTool{},
+			Prompts:   []MCPPrompt{},
+			Resources: []MCPResource{},
 		}, true
 	}
 
@@ -673,6 +801,10 @@ func (m *Manager) GetInfo(name string) (*ServerInfo, bool) {
 	copy(cp.Logs, info.Logs)
 	cp.Tools = make([]MCPTool, len(info.Tools))
 	copy(cp.Tools, info.Tools)
+	cp.Prompts = make([]MCPPrompt, len(info.Prompts))
+	copy(cp.Prompts, info.Prompts)
+	cp.Resources = make([]MCPResource, len(info.Resources))
+	copy(cp.Resources, info.Resources)
 	return &cp, true
 }
 

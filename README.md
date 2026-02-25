@@ -27,23 +27,14 @@ open http://localhost:9847
 
 ## Установка как systemd-сервис
 
-### Вариант 1: User service (без sudo)
-
-```bash
-make install-user
-systemctl --user enable --now mcp-manager
-```
-
-### Вариант 2: System service (с sudo)
-
 ```bash
 make install
-sudo systemctl enable --now mcp-manager@$USER
+sudo systemctl enable --now mcp-manager
 ```
 
 ## Конфигурация
 
-Конфиг хранится в `~/.config/mcp-manager/config.json` в формате, совместимом с Claude Desktop:
+Для systemd-сервиса конфиг хранится в `/etc/mcp-manager/config.json` в формате, совместимом с Claude Desktop:
 
 ```json
 {
@@ -93,3 +84,51 @@ sudo systemctl enable --now mcp-manager@$USER
 ## Порт
 
 По умолчанию: **9847** (можно изменить через `--port`)
+
+## MCP Proxy Endpoint
+
+Сервис теперь также работает как MCP-сервер (streamable HTTP) на endpoint:
+
+- `POST/DELETE /mcp`
+
+Пример подключения из `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "mcp-catalog-proxy": {
+      "type": "streamableHttp",
+      "url": "http://127.0.0.1:9847/mcp"
+    }
+  }
+}
+```
+
+Прокси агрегирует `tools/list` со всех `enabled` серверов и проксирует `tools/call`.
+Имена инструментов публикуются как `serverName__toolName`.
+
+Также проксируются:
+
+- `prompts/list`, `prompts/get` (имена как `serverName__promptName`)
+- `resources/list`, `resources/templates/list`, `resources/read` (URI переписываются в `mcp-catalog://...`)
+
+## MCP Proxy over STDIO
+
+Можно запускать этот сервис как локальный MCP server по stdio:
+
+```bash
+./mcp-manager --mcp-stdio
+```
+
+Пример подключения (stdio-клиенты):
+
+```json
+{
+  "mcpServers": {
+    "mcp-catalog-proxy-stdio": {
+      "command": "/path/to/mcp-manager",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```

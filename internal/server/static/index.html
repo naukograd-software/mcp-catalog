@@ -839,6 +839,8 @@
       const s = servers[name];
       const active = selectedServer === name ? 'active' : '';
       const toolCount = s.tools ? s.tools.length : 0;
+      const promptCount = s.prompts ? s.prompts.length : 0;
+      const resourceCount = s.resources ? s.resources.length : 0;
       return `
         <div class="server-item ${active}" onclick="selectServer('${name}')">
           <div class="server-item-header">
@@ -846,7 +848,7 @@
             <span class="status-badge status-${s.status}">${s.status}</span>
           </div>
           <div class="server-meta">
-            ${escapeHtml(configSummary(s.config))} · <span class="tool-count">${toolCount} tools</span>
+            ${escapeHtml(configSummary(s.config))} · <span class="tool-count">${toolCount}t / ${promptCount}p / ${resourceCount}r</span>
           </div>
           ${s.status === 'error' && s.error ? `<div class="server-meta" style="color:var(--red);margin-top:4px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.error)}</div>` : ''}
         </div>
@@ -966,6 +968,48 @@
         <div class="section-title">Tools</div>
         <div style="color:var(--text-dim);font-size:13px">
           ${s.status === 'checking' ? 'Checking...' : 'Run check to discover tools'}
+        </div>
+      </div>
+      `}
+
+      ${s.prompts && s.prompts.length > 0 ? `
+      <div class="section">
+        <div class="section-title">Prompts (${s.prompts.length})</div>
+        <div class="tools-grid">
+          ${s.prompts.map(p => `
+            <div class="tool-card">
+              <div class="tool-name">${escapeHtml(p.name)}</div>
+              <div class="tool-desc">${escapeHtml(p.description || 'No description')}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : `
+      <div class="section">
+        <div class="section-title">Prompts</div>
+        <div style="color:var(--text-dim);font-size:13px">
+          ${s.status === 'checking' ? 'Checking...' : 'No prompts discovered'}
+        </div>
+      </div>
+      `}
+
+      ${s.resources && s.resources.length > 0 ? `
+      <div class="section">
+        <div class="section-title">Resources (${s.resources.length})</div>
+        <div class="tools-grid">
+          ${s.resources.map(r => `
+            <div class="tool-card">
+              <div class="tool-name">${escapeHtml(r.name || r.uri)}</div>
+              <div class="tool-desc">${escapeHtml(r.uri)}${r.mimeType ? ' · ' + escapeHtml(r.mimeType) : ''}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : `
+      <div class="section">
+        <div class="section-title">Resources</div>
+        <div style="color:var(--text-dim);font-size:13px">
+          ${s.status === 'checking' ? 'Checking...' : 'No resources discovered'}
         </div>
       </div>
       `}

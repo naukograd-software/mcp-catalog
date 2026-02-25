@@ -22,14 +22,17 @@ type Server struct {
 	mgr      *manager.Manager
 	clients  map[*websocket.Conn]bool
 	mu       sync.RWMutex
+	mcpMu    sync.RWMutex
+	mcpState map[string]*mcpSession
 	upgrader websocket.Upgrader
 }
 
 func New(store *config.Store, mgr *manager.Manager) *Server {
 	s := &Server{
-		store:   store,
-		mgr:     mgr,
-		clients: make(map[*websocket.Conn]bool),
+		store:    store,
+		mgr:      mgr,
+		clients:  make(map[*websocket.Conn]bool),
+		mcpState: make(map[string]*mcpSession),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -60,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tools/", s.handleToolAction)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/ws", s.handleWS)
+	mux.HandleFunc("/mcp", s.handleMCPProxy)
 
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")

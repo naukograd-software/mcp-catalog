@@ -18,6 +18,25 @@ type MCPServer struct {
 	Enabled bool              `json:"enabled"`
 }
 
+func (s *MCPServer) UnmarshalJSON(data []byte) error {
+	type Alias MCPServer
+	aux := struct {
+		Enabled *bool `json:"enabled"`
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Enabled == nil {
+		s.Enabled = true
+	} else {
+		s.Enabled = *aux.Enabled
+	}
+	return nil
+}
+
 // Config holds the full configuration
 type Config struct {
 	MCPServers          map[string]*MCPServer `json:"mcpServers"`

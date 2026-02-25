@@ -382,8 +382,16 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 	startTime := time.Now()
 	m.addLog(info, "info", fmt.Sprintf("Connecting via streamable HTTP: %s", srv.URL))
 	client := &http.Client{Timeout: checkTimeout}
+	sessionID := ""
+	defer func() {
+		if sessionID != "" {
+			if err := closeStreamableHTTPSession(client, srv.URL, sessionID); err != nil {
+				m.addLog(info, "warn", fmt.Sprintf("Failed to close HTTP MCP session %q: %v", sessionID, err))
+			}
+		}
+	}()
 
-	send := func(payload map[string]any, expectResponse bool) (*mcpResponse, error) {
+	send := func(payload map[string]any, expectResponse bool, expectedID int) (*mcpResponse, error) {
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return nil, fmt.Errorf("encode request: %w", err)
@@ -395,12 +403,18 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
+		if sessionID != "" {
+			req.Header.Set("MCP-Session-Id", sessionID)
+		}
 
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("send request: %w", err)
 		}
 		defer resp.Body.Close()
+		if id := strings.TrimSpace(resp.Header.Get("MCP-Session-Id")); id != "" {
+			sessionID = id
+		}
 
 		if resp.StatusCode >= 400 {
 			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -417,7 +431,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 			return nil, fmt.Errorf("read response: %w", err)
 		}
 
-		parsed, err := decodeHTTPMCPResponse(raw)
+		parsed, err := decodeHTTPMCPResponse(raw, expectedID)
 		if err != nil {
 			return nil, err
 		}
@@ -438,7 +452,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		},
 	}
 
-	initResp, err := send(initReq, true)
+	initResp, err := send(initReq, true, 1)
 	if err != nil {
 		info.CheckDuration = time.Since(startTime).Milliseconds()
 		m.addLog(info, "error", fmt.Sprintf("Initialize request failed: %v", err))
@@ -464,7 +478,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		"jsonrpc": "2.0",
 		"method":  "notifications/initialized",
 	}
-	if _, err := send(notif, false); err != nil {
+	if _, err := send(notif, false, 0); err != nil {
 		m.addLog(info, "warn", fmt.Sprintf("Failed to send initialized notification: %v", err))
 	}
 
@@ -474,7 +488,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		"method":  "tools/list",
 		"params":  map[string]any{},
 	}
-	toolsResp, err := send(toolsReq, true)
+	toolsResp, err := send(toolsReq, true, 2)
 	if err != nil {
 		info.CheckDuration = time.Since(startTime).Milliseconds()
 		m.addLog(info, "warn", fmt.Sprintf("tools/list request failed: %v", err))
@@ -500,20 +514,30 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 	return nil
 }
 
-func decodeHTTPMCPResponse(raw []byte) (*mcpResponse, error) {
+func decodeHTTPMCPResponse(raw []byte, expectedID int) (*mcpResponse, error) {
 	data := strings.TrimSpace(string(raw))
 	if data == "" {
 		return nil, fmt.Errorf("empty response body")
 	}
 
-	var resp mcpResponse
-	if err := json.Unmarshal([]byte(data), &resp); err == nil && (resp.JSONRPC != "" || resp.Result != nil || resp.Error != nil) {
-		return &resp, nil
+	var candidates []mcpResponse
+	addCandidate := func(resp mcpResponse) {
+		if resp.JSONRPC == "" && resp.Result == nil && resp.Error == nil {
+			return
+		}
+		candidates = append(candidates, resp)
+	}
+
+	var single mcpResponse
+	if err := json.Unmarshal([]byte(data), &single); err == nil {
+		addCandidate(single)
 	}
 
 	var batch []mcpResponse
 	if err := json.Unmarshal([]byte(data), &batch); err == nil && len(batch) > 0 {
-		return &batch[0], nil
+		for _, resp := range batch {
+			addCandidate(resp)
+		}
 	}
 
 	// Fallback for SSE replies where payload comes as "data: {json}" lines.
@@ -526,12 +550,53 @@ func decodeHTTPMCPResponse(raw []byte) (*mcpResponse, error) {
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}
-		if err := json.Unmarshal([]byte(payload), &resp); err == nil {
-			return &resp, nil
+		var sseSingle mcpResponse
+		if err := json.Unmarshal([]byte(payload), &sseSingle); err == nil {
+			addCandidate(sseSingle)
+			continue
+		}
+
+		var sseBatch []mcpResponse
+		if err := json.Unmarshal([]byte(payload), &sseBatch); err == nil {
+			for _, resp := range sseBatch {
+				addCandidate(resp)
+			}
 		}
 	}
 
-	return nil, fmt.Errorf("unable to decode MCP response: %s", data)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("unable to decode MCP response: %s", data)
+	}
+
+	if expectedID > 0 {
+		for i := range candidates {
+			if candidates[i].ID == expectedID {
+				return &candidates[i], nil
+			}
+		}
+		return nil, fmt.Errorf("response for id=%d not found in body: %s", expectedID, data)
+	}
+
+	return &candidates[0], nil
+}
+
+func closeStreamableHTTPSession(client *http.Client, url, sessionID string) error {
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return fmt.Errorf("create close request: %w", err)
+	}
+	req.Header.Set("MCP-Session-Id", sessionID)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send close request: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("close status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // CheckAll checks all enabled servers.

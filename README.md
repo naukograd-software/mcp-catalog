@@ -51,10 +51,20 @@ sudo systemctl enable --now mcp-manager
         "BRAVE_API_KEY": "your-key"
       },
       "enabled": true
+    },
+    "xquik": {
+      "type": "streamableHttp",
+      "url": "https://xquik.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_XQUIK_API_KEY"
+      },
+      "enabled": true
     }
   }
 }
 ```
+
+`headers` поддерживаются для удаленных `streamableHttp` серверов и применяются при проверке, проксировании вызовов и закрытии MCP-сессии.
 
 ## API
 

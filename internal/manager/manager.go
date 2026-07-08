@@ -453,6 +453,17 @@ func isStreamableHTTPServer(srv *config.MCPServer) bool {
 	return strings.TrimSpace(srv.URL) != "" && strings.TrimSpace(srv.Command) == ""
 }
 
+func applyConfiguredHeaders(req *http.Request, headers map[string]string) {
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+}
+
 func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo) error {
 	if srv.URL == "" {
 		err := fmt.Errorf("missing url for streamableHttp server")
@@ -466,7 +477,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 	sessionID := ""
 	defer func() {
 		if sessionID != "" {
-			if err := closeStreamableHTTPSession(client, srv.URL, sessionID); err != nil {
+			if err := closeStreamableHTTPSession(client, srv.URL, sessionID, srv.Headers); err != nil {
 				m.addLog(info, "warn", fmt.Sprintf("Failed to close HTTP MCP session %q: %v", sessionID, err))
 			}
 		}
@@ -484,6 +495,7 @@ func (m *Manager) doCheckStreamableHTTP(srv *config.MCPServer, info *ServerInfo)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
+		applyConfiguredHeaders(req, srv.Headers)
 		if sessionID != "" {
 			req.Header.Set("MCP-Session-Id", sessionID)
 		}
@@ -707,11 +719,12 @@ func decodeHTTPMCPResponse(raw []byte, expectedID int) (*mcpResponse, error) {
 	return &candidates[0], nil
 }
 
-func closeStreamableHTTPSession(client *http.Client, url, sessionID string) error {
+func closeStreamableHTTPSession(client *http.Client, url, sessionID string, headers map[string]string) error {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
 		return fmt.Errorf("create close request: %w", err)
 	}
+	applyConfiguredHeaders(req, headers)
 	req.Header.Set("MCP-Session-Id", sessionID)
 
 	resp, err := client.Do(req)

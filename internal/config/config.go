@@ -15,6 +15,7 @@ type MCPServer struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	Enabled bool              `json:"enabled"`
 }
 

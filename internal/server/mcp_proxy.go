@@ -24,6 +24,17 @@ const proxyTimeout = 30 * time.Second
 const proxyResourcePrefix = "mcp-catalog://resource/"
 const proxyResourceTemplatePrefix = "mcp-catalog://resource-template/"
 
+func applyConfiguredHeaders(req *http.Request, headers map[string]string) {
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+}
+
 func nextUniqueName(base string, used map[string]struct{}) string {
 	name := strings.TrimSpace(base)
 	if name == "" {
@@ -201,7 +212,7 @@ func (s *Server) handleMCPProxy(w http.ResponseWriter, r *http.Request) {
 			s.writeRPCError(w, req.ID, -32000, err.Error())
 			return
 		}
-		
+
 		s.writeRawResult(w, req.ID, result, sessionID)
 		return
 	case "prompts/list":
@@ -494,7 +505,7 @@ func (s *Server) aggregateTools() ([]proxiedTool, map[string]toolRoute) {
 		if info == nil || !info.Config.Enabled {
 			continue
 		}
-		
+
 		for _, t := range info.Tools {
 			name := t.Name
 			// Only use server prefix if there's a conflict or tool is too generic
@@ -502,10 +513,10 @@ func (s *Server) aggregateTools() ([]proxiedTool, map[string]toolRoute) {
 				base := strings.TrimSuffix(serverName, "-mcp")
 				name = fmt.Sprintf("%s_%s", base, t.Name)
 			}
-			
+
 			// Ensure absolute uniqueness in the proxy
 			name = nextUniqueName(name, usedNames)
-			
+
 			tools = append(tools, proxiedTool{
 				Name:        name,
 				Description: t.Description,
@@ -670,6 +681,7 @@ func forwardHTTP(ctx context.Context, srv *config.MCPServer, method string, para
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
+		applyConfiguredHeaders(req, srv.Headers)
 		if sessionID != "" {
 			req.Header.Set("MCP-Session-Id", sessionID)
 		}
@@ -699,6 +711,7 @@ func forwardHTTP(ctx context.Context, srv *config.MCPServer, method string, para
 		if err != nil {
 			return
 		}
+		applyConfiguredHeaders(req, srv.Headers)
 		req.Header.Set("MCP-Session-Id", sessionID)
 		resp, err := client.Do(req)
 		if err == nil {
